@@ -1,0 +1,211 @@
+Модуль 1:
+- краткая спецификация
+- входные и выходные данные
+- основной алгоритм
+- детализация алгоритма
+- интерфейс (переходы, кнопка "Назад", заголовки окон, уведомления о действиях и ошибках)
+- отладка
+- тесты
+
+Модуль 2:
+- ER-диаграмма
+- схема базы данных
+- заполненные таблицы и связи
+- запросы к базе данных
+- резервное копирование БД
+- отобразить роли
+- реализация уровня доступа в зависимости от роли
+
+Модуль 3:
+- роль менеджера
+- функционал для менеджера
+- QR-код
+- руководство системного администратора
+- вариант модификации (в текстовом формате)
+- качественные характеристики кода (полнота обработки ошибки данных, наличие тестов, 
+
+CREATE TABLE [dbo].[Role]
+(
+	[id] INT NOT NULL PRIMARY KEY IDENTITY,
+	[name] NVARCHAR(50) NOT NULL
+)
+
+CREATE TABLE [dbo].[User]
+(
+	[id] INT NOT NULL PRIMARY KEY IDENTITY, 
+    [login] NVARCHAR(50) NOT NULL, 
+    [password] NVARCHAR(50) NOT NULL, 
+    [name] NVARCHAR(50) NOT NULL, 
+    [role_id] INT NOT NULL IDENTITY, 
+    CONSTRAINT [FK_Table_ToTable] FOREIGN KEY ([role_id]) REFERENCES [Role]([id])
+)
+
+CREATE TABLE [dbo].[Device]
+(
+	[id] INT NOT NULL PRIMARY KEY IDENTITY, 
+    [name] NVARCHAR(50) NOT NULL
+)
+
+CREATE TABLE [dbo].[Defect]
+(
+	[id] INT NOT NULL PRIMARY KEY IDENTITY, 
+    [name] NVARCHAR(50) NOT NULL, 
+    [device_id] INT NOT NULL, 
+    [price] INT NOT NULL, 
+    CONSTRAINT [FK_Defect_ToTable] FOREIGN KEY ([device_id]) REFERENCES [Device]([id])
+)
+
+CREATE TABLE [dbo].[Status]
+(
+	[id] INT NOT NULL PRIMARY KEY IDENTITY, 
+    [name] NVARCHAR(50) NOT NULL
+)
+
+INSERT INTO [Role] (name) VALUES (N'Клиент');
+INSERT INTO [Role] (name) VALUES (N'Администратор');
+INSERT INTO [Role] (name) VALUES (N'Оператор');
+INSERT INTO [Role] (name) VALUES (N'Мастер');
+
+INSERT INTO [User] (login, password, name, role_id) VALUES (N'ash34k6', N'tsdfu3er', N'Игорь Дремин', 1);
+INSERT INTO [User] (login, password, name, role_id) VALUES (N'admin', N'admin', N'Самойлов Виктор', 2);
+INSERT INTO [User] (login, password, name, role_id) VALUES (N'master', N'master', N'Сухоруков Андрей', 4);
+
+BACKUP DATABASE Test
+TO DISK = 'C:\Users\danya\Downloads\backup.bak'
+
+public class Repository
+{
+    private readonly string ConnectionString = "Data Source=(localdb)\\AleisderDB;Database=Demo;Integrated Security=True;Encrypt=True;Trust Server Certificate=True;";
+    private readonly SqlConnection connection = new("Data Source=(localdb)\\AleisderDB;Database=Demo;Integrated Security=True;Encrypt=True;Trust Server Certificate=True;");
+
+    public List<User> GetAll()
+    {
+        using (var connection = new SqlConnection(ConnectionString))
+        {
+            string query = "SELECT * FROM [User]";
+            connection.Open();
+            var command = new SqlCommand(query, connection);
+            List<User> users = [];
+            using (var reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    int id = reader.GetInt32(0);
+                    string login = reader.GetString(1);
+                    string password = reader.GetString(2);
+                    string name = reader.GetString(3);
+                    int roleId = reader.GetInt32(4);
+
+                    var user = new User(id, login, password, name, roleId);
+                    users.Add(user);
+                }
+            }
+            return users;
+        }
+    }
+
+    public bool ValidateUser(string login, string password) => 
+        GetAll()
+        .Any(x => x.Login ==  login && x.Password == password);
+
+
+    public bool AddRequest(Request request)
+    {
+        using var connection = new SqlConnection(ConnectionString);
+        string query = "INSERT INTO [Request] (device_id, defect_id, description, serial_number, client_email, comment) VALUES (@device, @defect, @description, @serialNumber, @clientEmail, @comment)";
+        var command = new SqlCommand(query, connection);
+
+        var device = new SqlParameter("@device", request.DeviceId);
+        var defect = new SqlParameter("@defect", request.DefectId);
+        var description = new SqlParameter("@description", request.Description);
+        var serialNumber = new SqlParameter("@serialNumber", request.SerialNumber);
+        var clientEmail = new SqlParameter("@clientEmail", request.ClientEmail);
+        var comment = new SqlParameter("@comment", request.Comment);
+
+        command.Parameters.AddRange([device, defect, description, serialNumber, clientEmail, comment]);
+        connection.Open();
+
+        int result = command.ExecuteNonQuery();
+        connection.Close();
+        return result == 1;
+    }
+
+
+    public bool AssignExecutor(int requestId, int executorId)
+    {
+        connection.Open();
+        string query = "UPDATE [Request] SET executor_id = @executor_id WHERE id = @request_id";
+
+        var command = new SqlCommand(query, connection);
+
+        var request = new SqlParameter("@request_id", requestId);
+        var executor = new SqlParameter("@request_id", executorId);
+
+        command.Parameters.AddRange([request, executor]);
+
+        int result = command.ExecuteNonQuery();
+        connection.Close();
+        return result == 1;
+    }
+
+    public List<Device> GetDevices()
+    {
+        connection.Open();
+        string query = "SELECT * FROM [Device]";
+
+        var command = new SqlCommand(query, connection);
+        using var reader = command.ExecuteReader();
+        List<Device> devices = [];
+        while (reader.Read())
+        {
+            int id = reader.GetInt32(0);
+            string name = reader.GetString(1);
+
+            var device = new Device(id, name);
+            devices.Add(device);
+        }
+        reader.Close();
+        connection.Close();
+        return devices;
+    }
+
+    public List<Defect> GetDefectsByDeviceId(int deviceId)
+    {
+        connection.Open();
+        string query = "SELECT * FROM [Defect] WHERE device_id = @device_id";
+
+        var deviceParam = new SqlParameter("@device_id", deviceId);
+
+        var command = new SqlCommand(query, connection);
+        command.Parameters.Add(deviceParam);
+
+        List<Defect> defects = [];
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            int id = reader.GetInt32(0);
+            int device = reader.GetInt32(1);
+            string description = reader.GetString(2);
+            int price = reader.GetInt32(3);
+
+            var defect = new Defect(id, device, description, price);
+            defects.Add(defect);
+        }
+        reader.Close();
+        connection.Close();
+
+        return defects;
+    }
+}
+
+var generator = new QRCodeGenerator();
+var data = generator.CreateQrCode("https://github.com/Aleisder", QRCodeGenerator.ECCLevel.H);
+var image = new PngByteQRCode(data);
+
+byte[] qrCode = image.GetGraphic(40);
+
+var bitmap = new BitmapImage();
+bitmap.BeginInit();
+bitmap.StreamSource = new MemoryStream(qrCode);
+bitmap.EndInit();
